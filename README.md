@@ -42,9 +42,19 @@ A `.sha256` checksum is published next to each tarball.
 ### Homebrew
 
 ```bash
-brew tap schappim/ekctl
-brew install ekctl
+brew tap jxu-dev-c/ekctl
+brew install jxu-dev-c/ekctl/ekctl
 ```
+
+### Agent skill
+
+Install the ekctl skill from this repository:
+
+```bash
+npx skills add jxu-dev-c/ekctl --skill ekctl --global --agent codex
+```
+
+The skill is maintained in [`skills/ekctl`](skills/ekctl/SKILL.md).
 
 ### Build from source
 

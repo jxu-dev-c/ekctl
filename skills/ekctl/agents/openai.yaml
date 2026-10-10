@@ -1,0 +1,4 @@
+interface:
+  display_name: "ekctl"
+  short_description: "Manage Apple Calendar and Reminders locally"
+  default_prompt: "Use $ekctl to show my next five Apple Calendar events."
