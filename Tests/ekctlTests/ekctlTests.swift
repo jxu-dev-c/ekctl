@@ -1238,6 +1238,57 @@ final class UpdateReminderLogicTests: XCTestCase {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Tests for `--urgent` on `add reminder` / `update reminder`. The ReminderKit
+/// bridge itself needs live Reminders data, so these cover the pure validation
+/// rule and how the `urgent` field renders in each output format.
+final class UrgentReminderTests: XCTestCase {
+
+    func testUrgentTrueWithoutDueDateIsRejected() {
+        XCTAssertEqual(
+            UrgentReminders.validate(urgent: true, hasDueDate: false),
+            "Urgent reminders need a due date and time; pass --due.")
+    }
+
+    func testUrgentTrueWithDueDateIsAccepted() {
+        XCTAssertNil(UrgentReminders.validate(urgent: true, hasDueDate: true))
+    }
+
+    func testClearingUrgentNeverNeedsADueDate() {
+        XCTAssertNil(UrgentReminders.validate(urgent: false, hasDueDate: false))
+    }
+
+    func testOmittedUrgentIsAlwaysAccepted() {
+        XCTAssertNil(UrgentReminders.validate(urgent: nil, hasDueDate: false))
+    }
+
+    func testUrgentFieldRendersInJSONCSVAndText() {
+        let output = JSONOutput.success([
+            "reminders": [["id": "r1", "title": "Pay card", "urgent": true]],
+            "count": 1,
+        ])
+        let reminder = (output.toDictionary()["reminders"] as? [[String: Any]])?.first
+        XCTAssertEqual(reminder?["urgent"] as? Bool, true)
+
+        let csv = output.format(.csv).components(separatedBy: "\r\n")
+        XCTAssertEqual(csv[0], "id,title,urgent")
+        XCTAssertEqual(csv[1], "r1,Pay card,true")
+
+        XCTAssertTrue(output.format(.text).contains("true"))
+    }
+
+    func testUnknownUrgentStateRendersAsNull() {
+        let output = JSONOutput.success([
+            "reminder": ["id": "r1", "urgent": NSNull()]
+        ])
+        XCTAssertTrue(output.toJSON().contains("\"urgent\" : null"))
+        let csv = output.format(.csv).components(separatedBy: "\r\n")
+        XCTAssertEqual(csv[0], "id,urgent")
+        XCTAssertEqual(csv[1], "r1,")
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 /// Tests for `AvailabilitySetting` — the `--availability` value on
 /// `add event` / `update event`. Previously a raw String that was silently
 /// ignored when misspelled; now ArgumentParser rejects unknown values.

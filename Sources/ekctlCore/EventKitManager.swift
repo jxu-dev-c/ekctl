@@ -50,6 +50,8 @@ public class EventKitManager {
 
     private let timeFormat: TimeFormat
     private let eventStore = EKEventStore()
+    /// Nil when ReminderKit's urgent support is unavailable (before macOS 26).
+    private lazy var urgentReminders = UrgentReminders()
     private var calendarAccessGranted = false
     private var reminderAccessGranted = false
 
@@ -728,7 +730,9 @@ public class EventKitManager {
             EventFilter.matchesSearch(search, in: [reminder.title, reminder.notes])
         }
 
-        let reminderDicts = reminders.map { reminderToDict($0) }
+        let urgentStates = urgentReminders?.urgentStates(
+            for: reminders.map(\.calendarItemIdentifier))
+        let reminderDicts = reminders.map { reminderToDict($0, urgentStates: urgentStates) }
 
         return JSONOutput.success(["reminders": reminderDicts, "count": reminderDicts.count])
     }
@@ -749,8 +753,12 @@ public class EventKitManager {
         title: String,
         dueDate: Date?,
         priority: Int,
-        notes: String?
+        notes: String?,
+        urgent: Bool? = nil
     ) -> JSONOutput {
+        if let message = urgentPrecondition(urgent: urgent, hasDueDate: dueDate != nil) {
+            return JSONOutput.error(message)
+        }
         guard let calendar = eventStore.calendar(withIdentifier: listID) else {
             return JSONOutput.error("Reminder list not found with ID: \(listID)")
         }
@@ -778,9 +786,13 @@ public class EventKitManager {
             dueComponents.timeZone = TimeZone.current
             reminder.dueDateComponents = dueComponents
         }
+        if urgent == true { ensureDueAlarm(reminder) }
 
         do {
             try eventStore.save(reminder, commit: true)
+            if let failure = applyUrgent(urgent, to: reminder, savedVerb: "created") {
+                return failure
+            }
             return JSONOutput.success([
                 "status": "success",
                 "message": "Reminder created successfully",
@@ -798,11 +810,17 @@ public class EventKitManager {
         dueDate: Date?,
         priority: Int?,
         notes: String?,
-        completed: Bool?
+        completed: Bool?,
+        urgent: Bool? = nil
     ) -> JSONOutput {
         guard let reminder = eventStore.calendarItem(withIdentifier: reminderID) as? EKReminder
         else {
             return JSONOutput.error("Reminder not found with ID: \(reminderID)")
+        }
+        if let message = urgentPrecondition(
+            urgent: urgent, hasDueDate: dueDate != nil || reminder.dueDateComponents != nil)
+        {
+            return JSONOutput.error(message)
         }
 
         if let title = title { reminder.title = title }
@@ -822,9 +840,13 @@ public class EventKitManager {
             dueComponents.timeZone = TimeZone.current
             reminder.dueDateComponents = dueComponents
         }
+        if urgent == true { ensureDueAlarm(reminder) }
 
         do {
             try eventStore.save(reminder, commit: true)
+            if let failure = applyUrgent(urgent, to: reminder, savedVerb: "updated") {
+                return failure
+            }
             return JSONOutput.success([
                 "status": "success",
                 "message": "Reminder updated successfully",
@@ -875,6 +897,43 @@ public class EventKitManager {
             ])
         } catch {
             return JSONOutput.error("Failed to delete reminder: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Urgent Reminders
+
+    /// Checked before any save so a rejected `--urgent` leaves the reminder
+    /// untouched.
+    private func urgentPrecondition(urgent: Bool?, hasDueDate: Bool) -> String? {
+        guard urgent != nil else { return nil }
+        guard urgentReminders != nil else { return UrgentReminders.unavailableMessage }
+        return UrgentReminders.validate(urgent: urgent, hasDueDate: hasDueDate)
+    }
+
+    /// An urgent reminder rings through its due-time alarm. Reminders made in
+    /// the Reminders app carry one already; ones made through EventKit with
+    /// only a due date do not, and would never ring.
+    private func ensureDueAlarm(_ reminder: EKReminder) {
+        guard reminder.alarms?.isEmpty ?? true,
+            let components = reminder.dueDateComponents,
+            let due = Calendar.current.date(from: components)
+        else { return }
+        reminder.addAlarm(EKAlarm(absoluteDate: due))
+    }
+
+    /// Runs after the EventKit save, since the urgent flag lives in
+    /// ReminderKit. Returns an error result when the flag could not be set.
+    private func applyUrgent(_ urgent: Bool?, to reminder: EKReminder, savedVerb: String)
+        -> JSONOutput?
+    {
+        guard let urgent = urgent, let urgentReminders = urgentReminders else { return nil }
+        do {
+            try urgentReminders.setUrgent(urgent, reminderID: reminder.calendarItemIdentifier)
+            return nil
+        } catch {
+            return JSONOutput.error(
+                "Reminder \(savedVerb) (ID: \(reminder.calendarItemIdentifier)), "
+                    + "but setting urgent failed: \(error)")
         }
     }
 
@@ -1045,8 +1104,11 @@ public class EventKitManager {
         return dict
     }
 
-    /// Converts an EKReminder to a dictionary for JSON output
-    private func reminderToDict(_ reminder: EKReminder) -> [String: Any] {
+    /// Converts an EKReminder to a dictionary for JSON output. `urgentStates`
+    /// is a batch lookup for lists; without it the flag is fetched singly.
+    private func reminderToDict(_ reminder: EKReminder, urgentStates: [String: Bool]? = nil)
+        -> [String: Any]
+    {
         let formatter = localDateFormatter
 
         var dict: [String: Any] = [
@@ -1059,6 +1121,10 @@ public class EventKitManager {
             "completed": reminder.isCompleted,
             "priority": reminder.priority,
         ]
+
+        let id = reminder.calendarItemIdentifier
+        let urgent = urgentStates.map { $0[id] } ?? urgentReminders?.urgentState(for: id)
+        dict["urgent"] = urgent ?? NSNull()
 
         if let dueDateComponents = reminder.dueDateComponents,
             let dueDate = Calendar.current.date(from: dueDateComponents)

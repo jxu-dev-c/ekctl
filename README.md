@@ -581,7 +581,8 @@ ekctl list reminders --list personal --search milk
       "dueDate": "2026-01-20T17:00:00Z",
       "completed": false,
       "priority": 0,
-      "notes": null
+      "notes": null,
+      "urgent": false
     }
   ],
   "status": "success"
@@ -621,6 +622,12 @@ ekctl add reminder \
   --notes "Check expiration date"
 ```
 
+Urgent (rings as an alarm at the due time; see [Urgent reminders](#urgent-reminders)):
+
+```bash
+ekctl add reminder --list bills --title "Pay credit card" --due "2026-10-14T09:00" --urgent true
+```
+
 **Output:**
 
 ```json
@@ -637,7 +644,8 @@ ekctl add reminder \
     "dueDate": "2026-01-25T09:00:00Z",
     "completed": false,
     "priority": 0,
-    "notes": null
+    "notes": null,
+    "urgent": false
   }
 }
 ```
@@ -661,6 +669,10 @@ ekctl update reminder REMINDER_ID --priority 1 --due "2026-03-10T09:00:00Z"
 
 # Mark as completed via update (same effect as complete command)
 ekctl update reminder REMINDER_ID --completed true
+
+# Make it ring as an alarm at its due time, or turn that off again
+ekctl update reminder REMINDER_ID --urgent true
+ekctl update reminder REMINDER_ID --urgent false
 ```
 
 **Output:**
@@ -679,10 +691,20 @@ ekctl update reminder REMINDER_ID --completed true
     "dueDate": "2026-02-01T09:00:00+08:00",
     "completed": false,
     "priority": 1,
-    "notes": "Updated notes"
+    "notes": "Updated notes",
+    "urgent": false
   }
 }
 ```
+
+### Urgent reminders
+
+macOS 26 Reminders can mark a reminder **Urgent**. At its due time it rings as a full-screen alarm instead of posting a normal notification. Pass `--urgent true|false` to `add reminder` or `update reminder`. Every reminder output includes `"urgent"`.
+
+- `--urgent true` needs a due date. Either pass `--due` or update a reminder that already has one; otherwise ekctl returns an error before saving anything.
+- If the reminder has no alarm, ekctl adds one at the due time, because nothing rings without an alarm. Reminders created in the Reminders app already have this alarm.
+- Public EventKit has no API for the urgent flag, so ekctl reads and writes it through Apple's private ReminderKit framework, loaded at runtime. If that support is missing (macOS before 26, or a future macOS that changes it), `urgent` reads as `null` and `--urgent` returns an error. Other fields are unaffected.
+- The other fields are saved through EventKit first, and the urgent flag is set afterwards. If setting the flag fails, the error says the rest of the reminder was saved.
 
 ### Complete Reminder
 
