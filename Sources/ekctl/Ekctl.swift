@@ -38,7 +38,7 @@ struct Ekctl: ParsableCommand {
         commandName: "ekctl",
         abstract:
             "A command-line tool for managing macOS Calendar events and Reminders using EventKit.",
-        version: "1.8.0",
+        version: "1.9.0",
         subcommands: [
             List.self, Show.self, Add.self, Update.self, Delete.self, Complete.self, Alias.self,
             CalendarCmd.self,
@@ -392,6 +392,13 @@ struct AddReminder: ParsableCommand {
     @Option(name: .long, help: "Optional notes.")
     var notes: String?
 
+    @Option(
+        name: .long,
+        help:
+            "Mark as urgent (true/false). Urgent reminders ring as an alarm at the due time and need a due date (macOS 26+)."
+    )
+    var urgent: Bool?
+
     @OptionGroup var outputFormat: OutputFormatOptions
 
     func run() throws {
@@ -399,6 +406,10 @@ struct AddReminder: ParsableCommand {
         var dueDate: Date?
         if let due = due {
             dueDate = try parseDateOption(due, flag: "--due", format: outputFormat.format)
+        }
+        if let message = UrgentReminders.validate(urgent: urgent, hasDueDate: dueDate != nil) {
+            print(JSONOutput.error(message).format(outputFormat.format))
+            throw ExitCode.failure
         }
 
         // Parse priority: require an integer when provided, else error
@@ -424,7 +435,8 @@ struct AddReminder: ParsableCommand {
             title: title,
             dueDate: dueDate,
             priority: priorityInt,
-            notes: notes
+            notes: notes,
+            urgent: urgent
         )
         print(result.format(outputFormat.format))
     }
@@ -541,6 +553,13 @@ struct UpdateReminder: ParsableCommand {
     @Option(name: .long, help: "Mark as completed (true/false).")
     var completed: Bool?
 
+    @Option(
+        name: .long,
+        help:
+            "Mark as urgent (true/false). Urgent reminders ring as an alarm at the due time and need a due date (macOS 26+)."
+    )
+    var urgent: Bool?
+
     @OptionGroup var outputFormat: OutputFormatOptions
 
     func run() throws {
@@ -570,7 +589,8 @@ struct UpdateReminder: ParsableCommand {
             dueDate: dueDate,
             priority: priorityInt,
             notes: notes,
-            completed: completed
+            completed: completed,
+            urgent: urgent
         )
         print(result.format(outputFormat.format))
     }
